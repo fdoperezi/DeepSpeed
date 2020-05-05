@@ -1,6 +1,7 @@
 import torch
 import deepspeed
 from deepspeed.pt.deepspeed_zero_optimizer import FP16_DeepSpeedZeroOptimizer
+from deepspeed.pt.zero_optimizer_stage1 import FP16_DeepSpeedZeroOptimizer_Stage1
 
 from deepspeed.pt.fp16_optimizer import FP16_Optimizer
 from deepspeed.pt.fp16_unfused_optimizer import FP16_UnfusedOptimizer
@@ -20,6 +21,11 @@ def compare_model_states(saved_model, loaded_model):
     if isinstance(saved_model.optimizer, FP16_DeepSpeedZeroOptimizer):
         for p0, p1 in zip(saved_model.optimizer.single_partition_of_fp32_groups, loaded_model.optimizer.single_partition_of_fp32_groups):
             assert torch.allclose(p0,p1,atol=1e-07), f"Fp32 model states {p0} is not equal to {p1}"
+
+    elif isinstance(saved_model.optimizer, FP16_DeepSpeedZeroOptimizer_Stage1):
+        for partition0, partition1 in zip(saved_model.optimizer.local_sub_partitions_of_fp32_groups, loaded_model.optimizer.local_sub_partitions_of_fp32_groups):
+            for p0, p1 in zip(partition0, partition1):
+                assert torch.allclose(p0,p1,atol=1e-07), f"Fp32 model states {p0} is not equal to {p1}"
 
     elif isinstance(saved_model.optimizer, FP16_Optimizer):
         for p0, p1 in zip(saved_model.optimizer.fp32_groups_flat, loaded_model.optimizer.fp32_groups_flat):
@@ -49,7 +55,8 @@ def compare_optimizer_states(saved_model, loaded_model, hidden_dim):
 def checkpoint_correctness_verification(args,
                                         model,
                                         hidden_dim,
-                                        load_optimizer_states=True):
+                                        tmpdir,
+                                        load_optimizer_states=True,):
 
     ds_model, _, _,_ = deepspeed.initialize(args=args,
                                             model=model,
@@ -65,7 +72,7 @@ def checkpoint_correctness_verification(args,
 
     trained_model = ds_model
 
-    save_folder = 'saved_checkpoint'
+    save_folder = os.path.join(tmpdir, 'saved_checkpoint')
     save_tag = '1'
 
     trained_model.save_checkpoint(save_folder, save_tag)
@@ -113,6 +120,7 @@ def test_checkpoint_unfused_optimizer(tmpdir):
         checkpoint_correctness_verification(args,
                                             model,
                                             hidden_dim,
+                                            tmpdir,
                                             load_optimizer_states=load_optimizer_states)
 
     _test_checkpoint_unfused_optimizer(args=args,
@@ -154,6 +162,7 @@ def test_checkpoint_fused_optimizer(tmpdir):
         checkpoint_correctness_verification(args,
                                             model,
                                             hidden_dim,
+                                            tmpdir,
                                             load_optimizer_states=load_optimizer_states)
 
     _test_checkpoint_fused_optimizer(args=args,
@@ -166,7 +175,8 @@ def test_checkpoint_fused_optimizer(tmpdir):
                                      load_optimizer_states=False)
 
 
-def test_checkpoint_zero_stage_1_optimizer(tmpdir):
+@pytest.mark.parametrize("zero_stage", [1, 2])
+def test_checkpoint_zero_optimizer(tmpdir, zero_stage):
     config_dict = {
         "train_batch_size": 2,
         "steps_per_print": 1,
@@ -183,7 +193,9 @@ def test_checkpoint_zero_stage_1_optimizer(tmpdir):
         "fp16": {
             "enabled": True
         },
-        "zero_optimization": 1
+        "zero_optimization": {
+            "stage": zero_stage
+        },
     }
     args = args_from_dict(tmpdir, config_dict)
     hidden_dim = 10
@@ -195,47 +207,7 @@ def test_checkpoint_zero_stage_1_optimizer(tmpdir):
         checkpoint_correctness_verification(args,
                                             model,
                                             hidden_dim,
-                                            load_optimizer_states=load_optimizer_states)
-
-    _test_checkpoint_zero_optimizer(args=args,
-                                    model=model,
-                                    hidden_dim=hidden_dim,
-                                    load_optimizer_states=True)
-    _test_checkpoint_zero_optimizer(args=args,
-                                    model=model,
-                                    hidden_dim=hidden_dim,
-                                    load_optimizer_states=False)
-
-
-def test_checkpoint_zero_stage_2_optimizer(tmpdir):
-    config_dict = {
-        "train_batch_size": 2,
-        "steps_per_print": 1,
-        "optimizer": {
-            "type": "Adam",
-            "params": {
-                "lr": 0.00015,
-                "betas": [0.8,
-                          0.999],
-                "eps": 1e-8,
-                "weight_decay": 3e-7
-            }
-        },
-        "fp16": {
-            "enabled": True
-        },
-        "zero_optimization": 2
-    }
-    args = args_from_dict(tmpdir, config_dict)
-    hidden_dim = 10
-
-    model = SimpleModel(hidden_dim, empty_grad=False)
-
-    @distributed_test(world_size=[2])
-    def _test_checkpoint_zero_optimizer(args, model, hidden_dim, load_optimizer_states):
-        checkpoint_correctness_verification(args,
-                                            model,
-                                            hidden_dim,
+                                            tmpdir,
                                             load_optimizer_states=load_optimizer_states)
 
     _test_checkpoint_zero_optimizer(args=args,
