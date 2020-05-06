@@ -52,11 +52,13 @@ def compare_optimizer_states(saved_model, loaded_model, hidden_dim):
                 assert s0 == s1
 
 
-def checkpoint_correctness_verification(args,
-                                        model,
-                                        hidden_dim,
-                                        tmpdir,
-                                        load_optimizer_states=True,):
+def checkpoint_correctness_verification(
+    args,
+    model,
+    hidden_dim,
+    tmpdir,
+    load_optimizer_states=True,
+):
 
     ds_model, _, _,_ = deepspeed.initialize(args=args,
                                             model=model,
