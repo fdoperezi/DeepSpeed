@@ -4,7 +4,7 @@ Licensed under the MIT license.
 
 Use to partition the activations stored for backward propagation
 Therefore reduces the memory consumption
-Also implements CPU checkpointing and contigious memory checkpointing
+Also implements CPU checkpointing and contiguous memory checkpointing
 Reduces memory consumption and memory fragmentation
 
 Code for rng checkpointing taken from NVIDIA Megatron-LM mpu/random.py
@@ -20,8 +20,13 @@ from torch import _C
 from torch.cuda import _lazy_call, device as device_ctx_manager
 from deepspeed.pt.deepspeed_timer import SynchronizedWallClockTimer as Timers
 import torch.distributed as dist
+from deepspeed.pt.deepspeed_config import DeepSpeedConfig
+
+#DeepSpeed Checkpointing Enabled or Disabled
+deepspeed_checkpointing_enabled = False
 
 #MP parameters
+mpu = None
 mp_rank = None
 mp_size = None
 mp_group = None
@@ -30,10 +35,10 @@ mp_group = None
 num_layers = None
 
 #Checkpointing buffers
-contigious_data_buffers = []
+contiguous_data_buffers = []
 data_offsets = []
 
-contigious_size_buffers = []
+contiguous_size_buffers = []
 size_offsets = []
 
 timers = None
@@ -41,7 +46,7 @@ timers = None
 #optimization flags
 PARTITION_ACTIVATIONS = False
 PA_TO_CPU = False
-CONTIGIOUS_CHECKPOINTING = False
+CONTIGUOUS_CHECKPOINTING = False
 SYNCHRONIZE = False
 PROFILE_TIME = False
 
@@ -291,7 +296,8 @@ def get_full_inputs(tensors, device=None):
             if i == mp_rank:
                 part_i.copy_(item)
             partitions.append(part_i)
-        dist.all_gather(partitions, partitions[mp_rank], group=mp_group)
+        if mp_group is not None:
+            dist.all_gather(partitions, partitions[mp_rank], group=mp_group)
         input_tensor = flat_tensor.view(list(size.numpy()))
         item.data = input_tensor.data
 
@@ -324,13 +330,17 @@ class CheckpointFunction(torch.autograd.Function):
         ctx.run_function = run_function
         global num_layers
         global mp_rank, mp_size, mp_group
-        global contigious_data_buffers, contigious_size_buffers
+        global contiguous_data_buffers, contiguous_size_buffers
         global data_offsets, size_offsets
         if mp_rank is None:
-            mp_rank = mpu.get_model_parallel_rank()
-            mp_size = mpu.get_model_parallel_world_size()
-            mp_group = mpu.get_model_parallel_group()
-
+            if mpu is not None:
+                mp_rank = mpu.get_model_parallel_rank()
+                mp_size = mpu.get_model_parallel_world_size()
+                mp_group = mpu.get_model_parallel_group()
+            else:
+                mp_rank = 0
+                mp_size = 1
+                mp_group = None
 
         global cuda_device, transport_stream, PARTITION_ACTIVATIONS, buffer_0, buffer_1, buffer_0_offset, buffer_1_offset
 
@@ -342,7 +352,7 @@ class CheckpointFunction(torch.autograd.Function):
                     f"----Partition Activations {PARTITION_ACTIVATIONS}, CPU CHECKPOINTING {PA_TO_CPU}"
                 )
                 print(
-                    f"----Contigious Memory Checkpointing {CONTIGIOUS_CHECKPOINTING} with {num_layers} total layers"
+                    f"----contiguous Memory Checkpointing {CONTIGUOUS_CHECKPOINTING} with {num_layers} total layers"
                 )
                 print(f"----Synchronization {SYNCHRONIZE}")
                 print(f"----Profiling {PROFILE_TIME}")
@@ -362,33 +372,33 @@ class CheckpointFunction(torch.autograd.Function):
                     get_partition_start(item),
                     partition_size).clone()
 
-                if CONTIGIOUS_CHECKPOINTING:
+                if CONTIGUOUS_CHECKPOINTING:
                     buffer_device = torch.device(
                         'cpu') if PA_TO_CPU else partition.device
 
-                    if i >= len(contigious_data_buffers):
+                    if i >= len(contiguous_data_buffers):
                         tensor_list = [
                             torch.tensor(()).new_empty([partition_size],
                                                        dtype=partition.dtype,
                                                        device=buffer_device)
                             for i in range(num_layers)
                         ]
-                        contigious_data_buffers.append(tensor_list)
+                        contiguous_data_buffers.append(tensor_list)
                         data_offsets.append(0)
-                    elif contigious_data_buffers[i] is None:
+                    elif contiguous_data_buffers[i] is None:
                         tensor_list = [
                             torch.tensor(()).new_empty([partition_size],
                                                        dtype=partition.dtype,
                                                        device=buffer_device)
                             for i in range(num_layers)
                         ]
-                        contigious_data_buffers[i] = tensor_list
+                        contiguous_data_buffers[i] = tensor_list
                         data_offsets[i] = 0
 
-                    contigious_partition = contigious_data_buffers[i][
+                    contiguous_partition = contiguous_data_buffers[i][
                         data_offsets[i]].data.copy_(partition.data)
                     data_offsets[i] = data_offsets[i] + 1
-                    inputs.append(contigious_partition)
+                    inputs.append(contiguous_partition)
                 else:
                     partition = partition.cpu() if PA_TO_CPU else partition
                     inputs.append(partition)
@@ -427,33 +437,33 @@ class CheckpointFunction(torch.autograd.Function):
                 arg.data = inp.data
                 new_args.append(arg)
 
-                if CONTIGIOUS_CHECKPOINTING:
+                if CONTIGUOUS_CHECKPOINTING:
                     numel = size.numel()
-                    if i >= len(contigious_size_buffers):
+                    if i >= len(contiguous_size_buffers):
                         tmp = torch.tensor(())
-                        contigious_size_buffers.append(
+                        contiguous_size_buffers.append(
                             tmp.new_empty([numel * num_layers],
                                           dtype=size.dtype,
                                           device=size.device))
                         size_offsets.append(0)
-                    elif contigious_size_buffers[i] is None:
+                    elif contiguous_size_buffers[i] is None:
                         tmp = torch.tensor(())
-                        contigious_size_buffers[i] = tmp.new_empty([numel * num_layers],
+                        contiguous_size_buffers[i] = tmp.new_empty([numel * num_layers],
                                                                    dtype=size.dtype,
                                                                    device=size.device)
                         size_offsets[i] = 0
 
-                    contigious_size = contigious_size_buffers[i].narrow(
+                    contiguous_size = contiguous_size_buffers[i].narrow(
                         0,
                         size_offsets[i],
                         numel).data.copy_(size.data)
-                    contigious_size = contigious_size.view_as(size)
+                    contiguous_size = contiguous_size.view_as(size)
                     size_offsets[i] = size_offsets[i] + numel
-                    new_args.append(contigious_size)
+                    new_args.append(contiguous_size)
                 else:
                     new_args.append(size)
                 #if dist.get_rank() == 0:
-                #    print (f"The stored tensor is {contigious_size} and orginal one is {size} ")
+                #    print (f"The stored tensor is {contiguous_size} and orginal one is {size} ")
 
             ctx.save_for_backward(*new_args)
         else:
@@ -469,7 +479,7 @@ class CheckpointFunction(torch.autograd.Function):
     def backward(ctx, *args):
         global timers
         #see_memory_usage("In backward", force=True)
-        #removing pointers to the contigious buffer memory
+        #removing pointers to the contiguous buffer memory
         #so that they can be garbage collected once the checkpoints
         #have been used
         if SYNCHRONIZE:
@@ -477,17 +487,17 @@ class CheckpointFunction(torch.autograd.Function):
         if PROFILE_TIME:
             timers('backward').start()
 
-        if CONTIGIOUS_CHECKPOINTING:
+        if CONTIGUOUS_CHECKPOINTING:
             global data_offsets, size_offsets
-            global contigious_data_buffers, contigious_size_buffers
+            global contiguous_data_buffers, contiguous_size_buffers
 
-            for buffers in contigious_data_buffers:
+            for buffers in contiguous_data_buffers:
                 buffers = []
 
             #frees up all the pointers to the checkpoints except for the ones
             #stored by save for backward
-            contigious_data_buffers = []
-            contigious_size_buffers = []
+            contiguous_data_buffers = []
+            contiguous_size_buffers = []
             data_offsets = []
             size_offsets = []
 
@@ -560,43 +570,103 @@ def set_num_layers(nlayers):
 
 
 def reset():
-    if CONTIGIOUS_CHECKPOINTING:
+    if CONTIGUOUS_CHECKPOINTING:
         global data_offsets, size_offsets
-        global contigious_data_buffers, contigious_size_buffers
+        global contiguous_data_buffers, contiguous_size_buffers
 
-        for buffers in contigious_data_buffers:
+        for buffers in contiguous_data_buffers:
             buffers = []
 
         #frees up all the pointers to the checkpoints except for the ones
         #stored by save for backward
-        contigious_data_buffers = []
-        contigious_size_buffers = []
+        contiguous_data_buffers = []
+        contiguous_size_buffers = []
         data_offsets = []
         size_offsets = []
 
 
-def configure(mpu_,
-              partition_activations=False,
-              contigious_checkpointing=False,
-              nlayers=None,
-              checkpoint_in_cpu=False,
-              synchronize=False,
-              profile_backward=False):
-
-    global mpu, num_layers
-
-    global PARTITION_ACTIVATIONS, CONTIGIOUS_CHECKPOINTING, \
+def _configure_using_config_file(deepspeed_config):
+    global num_layers, PARTITION_ACTIVATIONS, CONTIGUOUS_CHECKPOINTING, \
             PA_TO_CPU, SYNCHRONIZE, PROFILE_TIME
 
-    num_layers = nlayers
-    if checkpoint_in_cpu:
-        assert partition_activations, "CPU Checkpointing is only availble with partitioned activations"
-    if contigious_checkpointing:
-        assert num_layers is not None, "Must specify the number of layers with contigious memory checkpointing"
+    config = DeepSpeedConfig(deepspeed_config).activation_checkpointing_config
+    print(config.repr())
+    PARTITION_ACTIVATIONS = config.partition_activations
+    CONTIGUOUS_CHECKPOINTING = config.contiguous_memory_optimization
+    num_layers = config.number_checkpoints
+    PA_TO_CPU = config.cpu_checkpointing
+    SYNCHRONIZE = config.synchronize_checkpoint_boundary
+    PROFILE_TIME = config.profile
 
-    mpu = mpu_
-    PARTITION_ACTIVATIONS = partition_activations
-    CONTIGIOUS_CHECKPOINTING = contigious_checkpointing
-    PA_TO_CPU = checkpoint_in_cpu
-    SYNCHRONIZE = synchronize
-    PROFILE_TIME = profile_backward
+
+def _configure_defaults():
+
+    global mpu, num_layers, deepspeed_checkpointing_enabled
+
+    global PARTITION_ACTIVATIONS, CONTIGUOUS_CHECKPOINTING, \
+            PA_TO_CPU, SYNCHRONIZE, PROFILE_TIME
+
+    PARTITION_ACTIVATIONS = False
+    CONTIGUOUS_CHECKPOINTING = False
+    num_layers = False
+    PA_TO_CPU = False
+    SYNCHRONIZE = False
+    PROFILE_TIME = False
+    deepspeed_checkpointing_enabled = True
+
+
+'''the parameters from the deepspeed_config file will be overwritten
+by the parameters passed directly to this configure function'''
+
+
+def configure(
+    mpu_,
+    deepspeed_config=None,
+    partition_activations=None,
+    contiguous_checkpointing=None,
+    num_checkpoints=None,
+    checkpoint_in_cpu=None,
+    synchronize=None,
+    profile=None,
+):
+
+    global mpu, num_layers, deepspeed_checkpointing_enabled
+
+    global PARTITION_ACTIVATIONS, CONTIGUOUS_CHECKPOINTING, \
+            PA_TO_CPU, SYNCHRONIZE, PROFILE_TIME
+
+    _configure_defaults()
+
+    if deepspeed_config is not None:
+        _configure_using_config_file(deepspeed_config)
+
+    if mpu_ is not None:
+        mpu = mpu_
+
+    if partition_activations is not None:
+        PARTITION_ACTIVATIONS = partition_activations
+
+    if contiguous_checkpointing is not None:
+        CONTIGUOUS_CHECKPOINTING = contiguous_checkpointing
+
+    if num_checkpoints is not None:
+        num_layers = num_checkpoints
+
+    if checkpoint_in_cpu is not None:
+        PA_TO_CPU = checkpoint_in_cpu
+
+    if synchronize is not None:
+        SYNCHRONIZE = synchronize
+
+    if profile is not None:
+        PROFILE_TIME = profile
+
+    if PA_TO_CPU or CONTIGUOUS_CHECKPOINTING:
+        assert PARTITION_ACTIVATIONS, "CPU Checkpointing/Contiguous Checkpointing is only availble with partitioned activations. Set partitioned activations to true in deepspeed config"
+    if CONTIGUOUS_CHECKPOINTING:
+        assert num_layers is not None, "Must specify the number of layers with contiguous memory checkpointing"
+
+
+def is_configured():
+    global deepspeed_checkpointing_enabled
+    return deepspeed_checkpointing_enabled

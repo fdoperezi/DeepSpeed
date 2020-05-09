@@ -15,6 +15,7 @@ from tensorboardX import SummaryWriter
 from deepspeed.pt.deepspeed_timer import ThroughputTimer, SynchronizedWallClockTimer
 from deepspeed.pt.deepspeed_zero_optimizer import FP16_DeepSpeedZeroOptimizer
 from deepspeed.pt.zero_optimizer_stage1 import FP16_DeepSpeedZeroOptimizer_Stage1
+import deepspeed.pt.deepspeed_checkpointing as deepspeed_activation_checkpointing
 
 from deepspeed.pt.fp16_optimizer import FP16_Optimizer
 from deepspeed.pt.fp16_unfused_optimizer import FP16_UnfusedOptimizer
@@ -703,7 +704,7 @@ class DeepSpeedLight(Module):
 
         # scale loss w.r.t. gradient accumulation if needed
         if self.gradient_accumulation_steps() > 1:
-            loss = self._scale_loss(loss)
+            loss = self._scale_loss(loss.float())
 
         # Log training Loss
         if self.tensorboard_enabled():
