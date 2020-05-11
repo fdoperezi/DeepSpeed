@@ -1041,19 +1041,30 @@ class DeepSpeedLight(Module):
         if not os.path.exists(dirname):
             os.makedirs(dirname)
 
-    def load_checkpoint(self, load_dir, tag, load_optimizer_states=True):
+    def load_checkpoint(self,
+                        load_dir,
+                        tag,
+                        load_module_strict=True,
+                        load_optimizer_states=True,
+                        load_lr_scheduler_states=True):
         r"""Load training checkpoint
 
         Arguments:
             load_dir: Required. Directory to load the checkpoint from
             tag: Required. Checkpoint tag used as a unique identifier for the checkpoint. Ex. Global Step.
+            load_module_strict: Optional. Boolean to strictly enforce that the keys in state_dict of module and checkpoint match.
             load_optimizer_states: Optional. Boolean to load the training optimizer states from Checkpoint. Ex. ADAM's momentum and variance
+            load_lr_scheduler_states: Optional. Boolean to add the learning rate scheduler states from Checkpoint.
         Return:
             load_path: Path of the loaded checkpoint. None if loading the checkpoint failed
             client_state: State dictionary used for loading required training states in the client code.
         """
 
-        load_path, client_states = self._load_checkpoint(load_dir, tag, load_optimizer_states=load_optimizer_states)
+        load_path, client_states = self._load_checkpoint(load_dir,
+                                                         tag,
+                                                         load_module_strict=load_module_strict,
+                                                         load_optimizer_states=load_optimizer_states,
+                                                         load_lr_scheduler_states=load_lr_scheduler_states)
 
         if self.zero_optimization() and load_path is not None:
             self._load_zero_checkpoint(load_dir,
@@ -1062,7 +1073,12 @@ class DeepSpeedLight(Module):
 
         return load_path, client_states
 
-    def _load_checkpoint(self, load_dir, tag, load_optimizer_states=True):
+    def _load_checkpoint(self,
+                         load_dir,
+                         tag,
+                         load_module_strict=True,
+                         load_optimizer_states=True,
+                         load_lr_scheduler_states=True):
 
         load_path = self._get_ckpt_name(load_dir, tag)
 
@@ -1075,12 +1091,13 @@ class DeepSpeedLight(Module):
         logging.info('Loading checkpoint: {}'.format(load_path))
         checkpoint = torch.load(load_path, map_location=lambda storage, loc: storage)
 
-        self.load_module_state_dict(checkpoint['module'])
+        self.load_module_state_dict(state_dict=checkpoint['module'],
+                                    strict=load_module_strict)
         if not self.zero_optimization():
             self.optimizer.load_state_dict(checkpoint['optimizer'],
                                            load_optimizer_states=load_optimizer_states)
 
-        if self.lr_scheduler is not None:
+        if load_lr_scheduler_states and self.lr_scheduler is not None:
             self.lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
 
         self.csr_tensor_module_names = checkpoint['csr_tensor_module_names']
@@ -1089,6 +1106,7 @@ class DeepSpeedLight(Module):
         deepspeed_states = [
             'module',
             'optimizer',
+            'lr_scheduler',
             'csr_tensor_module_names',
             'skipped_steps',
             'global_step'
