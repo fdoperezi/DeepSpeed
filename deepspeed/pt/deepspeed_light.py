@@ -664,7 +664,7 @@ class DeepSpeedLight(Module):
         return scaled_loss
 
     def forward(self, *inputs, **kwargs):
-        r"""Execute forward propagation
+        """Execute forward propagation
 
         Arguments:
             *inputs: Variable length input list

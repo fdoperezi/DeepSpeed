@@ -1,12 +1,30 @@
 DeepSpeed
 =========
 
+Model Setup
+-----------
+
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
 
    initialize
    checkpointing
+
+Training API
+------------
+
+.. toctree::
+   :maxdepth: 3
+
+   training
+
+
+Checkpointing API
+-----------------
+.. toctree::
+   :maxdepth: 3
+
+   modules
 
 
 Indices and tables

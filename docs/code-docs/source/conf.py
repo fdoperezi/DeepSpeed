@@ -70,6 +70,8 @@ html_context = {
 # Mock imports so we don't have to install torch to build the docs.
 from unittest.mock import MagicMock
 sys.path.insert(0, os.path.abspath('../../../'))
+sys.path.insert(0, os.path.abspath('../../../deepspeed'))
+sys.path.insert(0, os.path.abspath('../../../deepspeed/pt'))
 
 
 class Mock(MagicMock):
