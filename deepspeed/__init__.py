@@ -158,15 +158,24 @@ def _add_core_arguments(parser):
 
 
 def add_config_arguments(parser):
-    r"""Update the argument parser to enabling parsing of DeepSpeed command line arguments.
-        The set of DeepSpeed arguments include the following:
-        1) --deepspeed: boolean flag to enable DeepSpeed
-        2) --deepspeed_config <json file path>: path of a json configuration file to configure DeepSpeed runtime.
+    r"""Update an argument parser to enable parsing of DeepSpeed command line arguments.
 
     Arguments:
-        parser: argument parser
-    Return:
-        parser: Updated Parser
+        parser (argparse.ArgumentParser): user-provided argument parser to update.
+
+    Returns:
+        parser (argparse.ArgumentParser): Updated ``parser``
+
+        The set of added DeepSpeed arguments include the following:
+
+        * ``--deepspeed_config``: path of a JSON configuration file used to configure DeepSpeed.
+
+        * ``--deepspeed_mpi``: flag to launch via MPI. This will attempt to discover the
+          necessary variables to initialize ``torch.distributed`` from the MPI environment.
+
+        * ``--deepspeed``: flag to enable DeepSpeed (optional helper for user code, no
+          impact on DeepSpeed backend).
+
     """
     parser = _add_core_arguments(parser)
 
