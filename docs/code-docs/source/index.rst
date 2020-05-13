@@ -3,7 +3,7 @@ DeepSpeed
 
 .. toctree::
    :maxdepth: 2
-   :caption: Core API
+   :caption: Contents:
 
    initialize
    checkpointing
