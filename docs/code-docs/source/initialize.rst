@@ -2,6 +2,7 @@ Training Setup
 ==============
 
 .. _deepspeed-args:
+
 Argument Parsing
 ----------------
 DeepSpeed uses the `argparse <https://docs.python.org/3/library/argparse.html>`_ library to
@@ -21,6 +22,7 @@ to add DeepSpeed's builtin arguments to your application's parser.
 
 
 .. _deepspeed-init:
+
 Training Initialization
 -----------------------
 The entrypoint for all training with DeepSpeed is ``deepspeed.initialize()``.

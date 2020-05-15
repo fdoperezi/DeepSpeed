@@ -70,29 +70,10 @@ html_context = {
 # Mock imports so we don't have to install torch to build the docs.
 from unittest.mock import MagicMock
 sys.path.insert(0, os.path.abspath('../../../'))
-sys.path.insert(0, os.path.abspath('../../../deepspeed'))
-sys.path.insert(0, os.path.abspath('../../../deepspeed/pt'))
 
+# Prepend module names to class descriptions?
+add_module_names = True
 
-class Mock(MagicMock):
-    @classmethod
-    def __getattr__(cls, name):
-        return MagicMock()
+autoclass_content = 'both'
 
-
-MOCK_MODULES = [
-    'torch',
-    'torch.utils',
-    'torch.utils.data',
-    'torch.utils.data.distributed',
-    'torch._utils',
-    'torch.cuda',
-    'torch.nn.modules',
-    'torch.nn',
-    'torch.distributed',
-    'torch.distributed.distributed_c10d',
-    'torch.optim',
-    'torch._six',
-    'torch.autograd',
-]
-sys.modules.update((mod_name, Mock()) for mod_name in MOCK_MODULES)
+autodoc_mock_imports = ["torch", "apex", "mpi4py"]
