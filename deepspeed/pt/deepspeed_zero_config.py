@@ -21,6 +21,7 @@ ZeRO optimization should be enabled as:
     "reduce_scatter": [true|false],
     "overlap_comm": [true|false],
     "reduce_bucket_size": 500000000
+    "contiguous_gradients" : [true|false]
     }
 }
 '''
@@ -48,7 +49,7 @@ ZERO_OPTIMIZATION_REDUCE_SCATTER_DEFAULT = True
 ZERO_OPTIMIZATION_OVERLAP_COMM = 'overlap_comm'
 ZERO_OPTIMIZATION_OVERLAP_COMM_DEFAULT = False
 
-ZERO_OPTIMIZATION_CONTIGIOUS_GRADIENTS = 'contigious_gradients'
+ZERO_OPTIMIZATION_CONTIGIOUS_GRADIENTS = 'contiguous_gradients'
 ZERO_OPTIMIZATION_CONTIGIOUS_GRADIENTS_DEFAULT = True
 
 ZERO_OPTIMIZATION_REDUCE_BUCKET_SIZE = 'reduce_bucket_size'
