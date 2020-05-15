@@ -50,7 +50,7 @@ jobs:
       rm -rf third_party/apex/dist/
       rm -rf build/
       rm -rf dist/
-      ./install.sh
+      ./install.sh --local_only
     displayName: 'Install DeepSpeed'
 
   - script: |
