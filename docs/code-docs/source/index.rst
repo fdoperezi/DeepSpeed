@@ -8,13 +8,12 @@ Model Setup
    :maxdepth: 2
 
    initialize
-   checkpointing
 
 Training API
 ------------
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
 
    training
 
@@ -22,7 +21,10 @@ Training API
 Checkpointing API
 -----------------
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
+
+   model-checkpointing
+   activation-checkpointing
 
 
 Indices and tables
